@@ -1,4 +1,3 @@
-# src/routes.py
 import logging
 import os
 import uuid
@@ -17,6 +16,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/user", tags=["user"])
 
+async def get_user_update(
+    username: Optional[str] = Form(None),
+    full_name: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
+    shift: Optional[str] = Form(None),
+) -> UserUpdate:
+    return UserUpdate(
+        username=username,
+        full_name=full_name,
+        email=email,
+        shift=shift
+    )
+
 @router.get("/profile", response_model=UserProfile)
 async def get_profile(current_user: User = Depends(get_current_user)):
     """Получение профиля текущего пользователя."""
@@ -24,22 +36,12 @@ async def get_profile(current_user: User = Depends(get_current_user)):
 
 @router.put("/profile", response_model=UserProfile)
 async def update_profile(
-    username: Optional[str] = Form(None),
-    full_name: Optional[str] = Form(None),
-    email: Optional[str] = Form(None),
-    shift: Optional[str] = Form(None),
+    user_update: UserUpdate = Depends(get_user_update),
     photo: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Обновление профиля пользователя."""
-    # Создаем объект UserUpdate для валидации
-    user_update = UserUpdate(
-        username=username,
-        full_name=full_name,
-        email=email,
-        shift=shift
-    )
     logger.debug(f"Parsed user_update: {user_update}")
 
     # Проверка и обновление username
@@ -66,9 +68,8 @@ async def update_profile(
     if user_update.shift is not None:
         current_user.shift = user_update.shift
 
-    # Обработка фото
+    # Обработка фото (оставляем как есть)
     if photo:
-        # Проверка расширения файла
         allowed_extensions = {".jpg", ".jpeg", ".png", ".gif"}
         file_ext = os.path.splitext(photo.filename)[1].lower()
         if file_ext not in allowed_extensions:
@@ -82,15 +83,14 @@ async def update_profile(
         try:
             async with aiofiles.open(file_path, "wb") as buffer:
                 content = await photo.read()
-                if len(content) > 5 * 1024 * 1024:  # Ограничение 5MB
+                if len(content) > 5 * 1024 * 1024:
                     raise HTTPException(status_code=400, detail="File too large. Max size: 5MB")
                 await buffer.write(content)
         except Exception as e:
             logger.error(f"Error uploading file: {e}")
             raise HTTPException(status_code=500, detail="Failed to upload file")
 
-        # Сохраняем относительный путь или URL
-        current_user.avatar_url = f"/uploads/{filename}"  # Предполагается, что у вас есть маршрут для отдачи файлов
+        current_user.avatar_url = f"/uploads/{filename}"
 
     await db.commit()
     await db.refresh(current_user)

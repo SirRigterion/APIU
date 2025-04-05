@@ -12,7 +12,7 @@ from src.db.database import get_db
 from src.core.config import settings
 from src.task.enums import TaskPriority, TaskStatus
 from src.task.schemas import ReassignTaskRequest, TaskHistoryResponse, TaskResponse
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 ADMIN_ROLE_ID = 2
@@ -42,26 +42,35 @@ async def create_task(
     description: Optional[str] = Form(None, max_length=5000),
     assignee_id: int = Form(...),
     due_date: Optional[datetime] = Form(None),
+    status: TaskStatus = Form(default=TaskStatus.ACTIVE),
+    priority: TaskPriority = Form(default=TaskPriority.MEDIUM),
     images: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Создание новой задачи."""
     if due_date:
         due_date = due_date.astimezone(timezone.utc).replace(tzinfo=None)
+
     try:
+        # Проверка существования assignee
         await verify_assignee(db, assignee_id)
-        
+
+        # Формирование данных задачи
         task_data = {
             "title": title,
             "description": description,
             "assignee_id": assignee_id,
-            "due_date": due_date.replace(tzinfo=None) if due_date else None,
-            "author_id": current_user.user_id
+            "due_date": due_date,
+            "author_id": current_user.user_id,
+            "status": status,  # Перечисление TaskStatus
+            "priority": priority  # Перечисление TaskPriority
         }
         task = Task(**task_data)
         db.add(task)
         await db.flush()
 
+        # Обработка изображений
         if images:
             os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
             for image in images:
@@ -73,7 +82,7 @@ async def create_task(
                     changes={"image": file_path}
                 ))
 
-
+        # Запись в историю создания задачи
         history_task_data = task_data.copy()
         if history_task_data["due_date"]:
             history_task_data["due_date"] = history_task_data["due_date"].isoformat()
@@ -84,84 +93,93 @@ async def create_task(
             event="TASK_CREATED",
             changes=history_task_data
         ))
-        
+
         await db.commit()
         await db.refresh(task)
         return task
+
     except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Ошибка при создании задачи: {str(e)}")
-    
+        raise HTTPException(status_code=500, detail=f"Ошибка при создании задачи: {str(e)}")   
+
 @router.put("/{task_id}", response_model=TaskResponse)
 async def update_task(
-    task_id: int = Path(...),
+    task_id: int,
     title: Optional[str] = Form(None, min_length=3, max_length=255),
     description: Optional[str] = Form(None, max_length=5000),
     assignee_id: Optional[int] = Form(None),
     due_date: Optional[datetime] = Form(None),
+    status: Optional[TaskStatus] = Form(None),
+    priority: Optional[TaskPriority] = Form(None),
     images: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    try:
-        result = await db.execute(
-            select(Task).where(Task.id == task_id, Task.is_deleted == False)
-        )
-        task = result.scalar_one_or_none()
-        if not task:
-            raise HTTPException(status_code=404, detail="Задача не найдена")
-        
-        if current_user.role_id != ADMIN_ROLE_ID and task.author_id != current_user.user_id:
-            raise HTTPException(status_code=403, detail="Недостаточно прав")
-        
-        changes = {}
-        if title and title != task.title:
-            changes["title"] = {"old": task.title, "new": title}
-            task.title = title
-        if description is not None and description != task.description:
-            changes["description"] = {"old": task.description, "new": description}
-            task.description = description
-        if assignee_id and assignee_id != task.assignee_id:
-            await verify_assignee(db, assignee_id)
-            changes["assignee_id"] = {"old": task.assignee_id, "new": assignee_id}
-            task.assignee_id = assignee_id
-        if due_date is not None:
-            new_due = due_date.replace(tzinfo=None)
-            if task.due_date != new_due:
-                changes["due_date"] = {
-                    "old": task.due_date.isoformat() if task.due_date else None,
-                    "new": new_due.isoformat()
-                }
-                task.due_date = new_due
+    """Обновление задачи."""
+    # Получение задачи из базы данных
+    result = await db.execute(
+        select(Task).options(joinedload(Task.assignee)).where(Task.id == task_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
 
-        if images:
-            os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-            for image in images:
-                file_path = await save_uploaded_file(image, task.id, settings.UPLOAD_DIR)
-                db.add(TaskHistory(
-                    task_id=task.id,
-                    user_id=current_user.user_id,
-                    event="IMAGE_ADDED",
-                    changes={"image": file_path}
-                ))
-            if not changes:
-                changes["images"] = "добавлены новые изображения"
+    # Обновление полей задачи, если они переданы
+    if title is not None:
+        task.title = title
+    if description is not None:
+        task.description = description
+    if assignee_id is not None:
+        await verify_assignee(db, assignee_id)
+        task.assignee_id = assignee_id
+    if due_date is not None:
+        task.due_date = due_date.astimezone(timezone.utc).replace(tzinfo=None)
+    if status is not None:
+        task.status = status
+    if priority is not None:
+        task.priority = priority
 
-        if changes:
+    # Обработка загруженных изображений
+    if images:
+        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+        for image in images:
+            file_path = await save_uploaded_file(image, task.id, settings.UPLOAD_DIR)
             db.add(TaskHistory(
                 task_id=task.id,
                 user_id=current_user.user_id,
-                event="TASK_UPDATED",
-                changes=changes
+                event="IMAGE_ADDED",
+                changes={"image": file_path}
             ))
-        
-        await db.commit()
-        await db.refresh(task)
-        return task
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Ошибка при обновлении задачи: {str(e)}")
-    
+
+    # Логирование изменений в историю
+    changes = {}
+    if title is not None:
+        changes["title"] = title
+    if description is not None:
+        changes["description"] = description
+    if assignee_id is not None:
+        changes["assignee_id"] = assignee_id
+    if due_date is not None:
+        changes["due_date"] = due_date.isoformat()
+    if status is not None:
+        changes["status"] = status.value
+    if priority is not None:
+        changes["priority"] = priority.value
+
+    if changes:
+        db.add(TaskHistory(
+            task_id=task.id,
+            user_id=current_user.user_id,
+            event="TASK_UPDATED",
+            changes=changes
+        ))
+
+    # Сохранение изменений в базе данных
+    await db.commit()
+    await db.refresh(task)
+
+    return task
+
 @router.delete("/{task_id}", response_model=dict)
 async def delete_task(
     task_id: int = Path(...),
@@ -230,7 +248,10 @@ async def get_my_tasks(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    query = select(Task).where(
+    query = select(Task).options(
+        selectinload(Task.assignee),
+        selectinload(Task.author)
+    ).where(
         Task.is_deleted == False,
         (Task.author_id == current_user.user_id) | (Task.assignee_id == current_user.user_id)
     )
@@ -277,7 +298,10 @@ async def reassign_task(
     # Получаем задачу с загруженными связями
     result = await db.execute(
         select(Task)
-        .options(selectinload(Task.assignee), selectinload(Task.author))
+        .options(
+            selectinload(Task.assignee),  # Предзагрузка исполнителя
+            selectinload(Task.author)     # Предзагрузка автора
+        )
         .where(Task.id == task_id, Task.is_deleted == False)
     )
     task = result.scalar_one_or_none()

@@ -6,8 +6,8 @@ from typing import Optional
 load_dotenv()
 
 class Settings:
-    PROJECT_NAME: str = "APITTK"
-    PROJECT_VERSION: str = "3.2"
+    PROJECT_NAME: str = "API TTK"
+    PROJECT_VERSION: str = "4"
     POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
     POSTGRES_PASSWORD: Optional[str] = os.getenv("POSTGRES_PASSWORD")
     POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "localhost")

@@ -28,13 +28,12 @@ app.add_middleware(
         "http://localhost:3001",
         "http://localhost:3000",
         
-        # Реальные IP-адреса
         "http://150.241.71.43:3001",
         "http://188.162.141.21",
         
-        # Дополнительно для удобства разработки (опционально)
-        "http://localhost",  # Без порта
-        r"http://localhost:\d+",  # Все порты localhost
+        "http://127.0.0.1",
+        "http://localhost", 
+        r"http://localhost:\d+"
     ],
     allow_credentials=True,
     allow_methods=["*"],  # Разрешить все методы

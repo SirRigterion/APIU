@@ -123,6 +123,7 @@ class TaskHistory(Base):
     task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     event: Mapped[str] = mapped_column(String(50))
+    comment = mapped_column(String(500), nullable=True)
     changed_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
     changes: Mapped[Optional[dict]] = mapped_column(JSON)
     
