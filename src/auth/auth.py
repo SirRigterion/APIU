@@ -29,9 +29,11 @@ def set_auth_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         key="access_token",
         value=token,
-        httponly=True,
+        httponly=False,
+        secure=True,
+        samesite="Lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        expires=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        expires=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
 
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> User:

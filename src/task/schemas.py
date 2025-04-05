@@ -34,3 +34,11 @@ class TaskHistoryResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class TaskUpdate(TaskCreate):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    priority: Optional[TaskPriority] = None
+    due_date: Optional[datetime] = None
+    assignee_id: Optional[int] = None
+    status: Optional[TaskStatus] = None
