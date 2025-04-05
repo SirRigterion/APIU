@@ -38,3 +38,8 @@ class UserUpdate(BaseModel):
 
 class UserSearch(BaseModel):
     limit: int = 10
+
+class UserInfo(BaseModel):
+    user_id: int
+    full_name: str
+    shift: str

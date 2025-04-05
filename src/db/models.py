@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import Column, DateTime, Integer, String, Boolean, ForeignKey, TIMESTAMP
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Boolean, ForeignKey, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from src.db.database import Base
@@ -69,6 +69,7 @@ class ArticleHistory(Base):
     old_content: Mapped[Optional[str]] = mapped_column(String(5000), nullable=True)
     new_content: Mapped[Optional[str]] = mapped_column(String(5000), nullable=True)
     article = relationship("Article", back_populates="history")
+
 # Задачи
 class Task(Base):
     __tablename__ = "tasks"
@@ -89,8 +90,13 @@ class Task(Base):
     author_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     assignee_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=func.now(), onupdate=func.now(), nullable=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=True)
+    history = relationship("TaskHistory", back_populates="task", cascade="all, delete-orphan")
+    author = relationship("User", foreign_keys=[author_id])
+    assignee = relationship("User", foreign_keys=[assignee_id])
+
 
 class TaskHistory(Base):
     __tablename__ = "task_history"
@@ -99,4 +105,4 @@ class TaskHistory(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     event: Mapped[str] = mapped_column(String(50))
     changed_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=func.now())
-
+    changes: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
