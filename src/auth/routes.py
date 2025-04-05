@@ -45,15 +45,15 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
 async def login(user: UserLogin, db: AsyncSession = Depends(get_db)):
     """Вход пользователя в систему."""
     try:
-        result = await db.execute(select(User).where(User.email == user.email))
+        result = await db.execute(select(User).where(User.username == user.username))
         db_user = result.scalar_one_or_none()
         if not db_user or not verify_password(user.password, db_user.hashed_password):
             raise HTTPException(status_code=401, detail="Неверные учетные данные")
 
-        token = create_access_token(data={"sub": user.email})
+        token = create_access_token(data={"sub": user.username})
         response = Response(status_code=200)
         set_auth_cookie(response, token)
-        logger.info(f"Пользователь {user.email} успешно вошел в систему")
+        logger.info(f"Пользователь {user.username} успешно вошел в систему")
         return response
     except Exception as e:
         logger.error(f"Ошибка при входе пользователя: {e}")
@@ -67,7 +67,7 @@ async def logout():
         response.delete_cookie(
             key="access_token",
             httponly=False,
-            samesite="none",
+            samesite="lax",
             secure=False
         )
         logger.info("Пользователь успешно вышел из системы")

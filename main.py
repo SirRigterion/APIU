@@ -21,24 +21,24 @@ logging.basicConfig(
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.PROJECT_VERSION)
 # Пример настроек CORS в FastAPI
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        # Локальные адреса для разработки
-        "http://localhost:3001",
-        "http://localhost:3000",
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=[
+#         # Локальные адреса для разработки
+#         "http://localhost:3001",
+#         "http://localhost:3000",
         
-        "http://150.241.71.43:3001",
-        "http://188.162.141.21",
+#         "http://150.241.71.43:3001",
+#         "http://188.162.141.21",
         
-        "http://127.0.0.1",
-        "http://localhost", 
-        r"http://localhost:\d+"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],  # Разрешить все методы
-    allow_headers=["*"],  # Разрешить все заголовки
-)
+#         "http://127.0.0.1",
+#         "http://localhost", 
+#         r"http://localhost:\d+"
+#     ],
+#     allow_credentials=True,
+#     allow_methods=["*"],  # Разрешить все методы
+#     allow_headers=["*"],  # Разрешить все заголовки
+# )
 
 
 app.include_router(auth_router)

@@ -29,5 +29,5 @@ class UserCreate(BaseModel):
         return value
 
 class UserLogin(BaseModel):
-    email: EmailStr = "user@example.com"
+    username: str = "admin"
     password: str = "string111"
