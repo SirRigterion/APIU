@@ -1,9 +1,7 @@
-from datetime import datetime
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Body, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, update
 from src.auth.auth import get_current_user
 from src.db.models import User, Task, TaskHistory
 from src.db.database import get_db
@@ -63,7 +61,6 @@ async def create_task(
                 task_id=new_task.id,
                 user_id=current_user.user_id,
                 event="TASK_CREATED",
-                # Используем dict вместо прямого создания словаря для надежности
                 changes=new_task.__dict__.copy()
             )
             db.add(history_entry)
@@ -247,7 +244,7 @@ async def get_shift_tasks(
 
     query = select(Task).join(User, Task.assignee_id == User.user_id).where(
         (Task.is_deleted == False) &
-        (User.shift == shift) &  # Используем параметр shift вместо user_shift
+        (User.shift == shift) &
         (Task.status != TaskStatus.COMPLETED)
     )
 
