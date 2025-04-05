@@ -4,8 +4,23 @@ from typing import List, Optional
 
 class ArticleCreate(BaseModel):
     title: str
+    description: Optional[str]
     content: str
-    image_path: Optional[str] = None
+    image_path: Optional[str]
+
+class ArticleResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str]
+    content: str
+    image_path: Optional[str]
+    author_id: int
+    created_at: datetime
+    updated_at: datetime
+    is_deleted: bool
+
+    class Config:
+        from_attributes = True
 
 class ArticleUpdate(BaseModel):
     title: Optional[str] = None
@@ -15,18 +30,6 @@ class ArticleImage(BaseModel):
     id: int
     image_path: str
 
-class ArticleResponse(BaseModel):
-    id: int
-    title: str
-    content: str
-    author_id: int
-    created_at: datetime
-    updated_at: datetime
-    images: List[ArticleImage]
-    is_deleted: bool
-
-    class Config:
-        from_attributes = True
 
 class ArticleHistoryResponse(BaseModel):
     id: int

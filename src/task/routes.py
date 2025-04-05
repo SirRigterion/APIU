@@ -1,173 +1,269 @@
 from datetime import datetime
-import aiofiles
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import func
+from uuid import uuid4
+from fastapi import APIRouter, Depends, HTTPException, Body, File, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from src.auth.auth import get_current_user
-from src.db.models import TaskHistory, User, Task
-from src.task.enums import TaskPriority, TaskStatus
-from src.db.database import get_db
-from src.task.schemas import TaskCreate, TaskResponse
-from src.core.config import settings
-from typing import List, Optional
-
-router = APIRouter(prefix="/tasks", tags=["tasks"])
-
-from fastapi import APIRouter, Depends, HTTPException, Form, File, UploadFile
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func
+from sqlalchemy import case, func, update
 from src.auth.auth import get_current_user
 from src.db.models import User, Task, TaskHistory
 from src.db.database import get_db
-from src.task.schemas import TaskCreate, TaskResponse, TaskStatus
+from src.task.schemas import TaskCreate, TaskResponse, TaskStatus, TaskHistoryResponse
 from typing import Optional, List
 import aiofiles
 from src.core.config import settings
 import os
+from src.task.enums import TaskPriority
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-@router.post("/", response_model=TaskResponse)
+@router.post("/", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 async def create_task(
-    task_data: TaskCreate = Depends(),
+    task_data: TaskCreate = Body(...),
     images: List[UploadFile] = File([]),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    result = await db.execute(select(User).where(User.user_id == task_data.assignee_id, User.is_deleted == False))
-    assignee = result.scalar_one_or_none()
-    if not assignee:
-        raise HTTPException(status_code=404, detail="Assignee not found")
-
-    due_date = task_data.due_date.replace(tzinfo=None) if task_data.due_date else None
-    task = Task(
-        title=task_data.title,
-        description=task_data.description,
-        priority=task_data.priority,
-        due_date=due_date,
-        author_id=current_user.user_id,
-        assignee_id=task_data.assignee_id
+    # Проверка существования исполнителя
+    assignee = await db.execute(
+        select(User).where(
+            User.user_id == task_data.assignee_id,
+            User.is_deleted == False
+        )
     )
-    db.add(task)
-    await db.commit()
-    await db.refresh(task)
+    if not assignee.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Assignee not found"
+        )
 
-    # Добавляем запись о создании задачи
-    db.add(TaskHistory(task_id=task.id, user_id=current_user.user_id, event="create"))
-
-    # Сохранение изображений
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    for image in images:
-        file_path = f"{settings.UPLOAD_DIR}/task_{task.id}_{image.filename}"
-        async with aiofiles.open(file_path, 'wb') as out_file:
-            content = await image.read()
-            await out_file.write(content)
-        db.add(TaskHistory(task_id=task.id, user_id=current_user.user_id, event="image_create"))
+    # Создание задачи
+    new_task = Task(
+        **task_data.dict(exclude={"assignee_id"}),
+        author_id=current_user.user_id,
+        assignee_id=task_data.assignee_id,
+        due_date=task_data.due_date.replace(tzinfo=None) if task_data.due_date else None
+    )
     
-    await db.commit()
-    await db.refresh(task)
-    return task
+    try:
+        db.add(new_task)
+        await db.commit()
+        await db.refresh(new_task)
+        
+        # Запись в историю
+        history_entry = TaskHistory(
+            task_id=new_task.id,
+            user_id=current_user.user_id,
+            event="TASK_CREATED",
+            changes={"status": {"old": None, "new": new_task.status.value}}
+        )
+        db.add(history_entry)
+
+        # Сохранение изображений
+        if images:
+            os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+            for image in images:
+                file_ext = os.path.splitext(image.filename)[1]
+                filename = f"task_{new_task.id}_{uuid4().hex}{file_ext}"
+                file_path = os.path.join(settings.UPLOAD_DIR, filename)
+                
+                async with aiofiles.open(file_path, "wb") as f:
+                    await f.write(await image.read())
+                
+                # Запись в историю о добавлении изображения
+                db.add(TaskHistory(
+                    task_id=new_task.id,
+                    user_id=current_user.user_id,
+                    event="IMAGE_ADDED",
+                    changes={"image": filename}
+                ))
+
+        await db.commit()
+        return new_task
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.get("/", response_model=List[TaskResponse])
 async def get_tasks(
     title: Optional[str] = None,
     assignee_id: Optional[int] = None,
     status: Optional[TaskStatus] = None,
+    priority: Optional[TaskPriority] = None,
+    offset: int = 0,
     limit: int = 10,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     query = select(Task).where(Task.is_deleted == False)
-    if title:
-        query = query.where(Task.title.ilike(f"%{title}%"))
-    if assignee_id:
-        query = query.where(Task.assignee_id == assignee_id)
-    if status:
-        query = query.where(Task.status == status)
-    query = query.limit(limit)
-    result = await db.execute(query)
+    
+    filters = []
+    if title: filters.append(Task.title.ilike(f"%{title}%"))
+    if assignee_id: filters.append(Task.assignee_id == assignee_id)
+    if status: filters.append(Task.status == status)
+    if priority: filters.append(Task.priority == priority)
+    
+    if filters:
+        query = query.where(*filters)
+    
+    result = await db.execute(
+        query.order_by(Task.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
     return result.scalars().all()
 
-@router.put("/{id}", response_model=TaskResponse)
+@router.put("/{task_id}", response_model=TaskResponse)
 async def update_task(
-    id: int,
-    title: Optional[str] = Form(None),
-    description: Optional[str] = Form(None),
-    priority: Optional[TaskPriority] = Form(None),
-    due_date: Optional[datetime] = Form(None),
-    assignee_id: Optional[int] = Form(None),
+    task_id: int,
+    task_data: TaskCreate = Body(...),
     images: List[UploadFile] = File([]),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    result = await db.execute(select(Task).where(Task.id == id, Task.is_deleted == False))
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    if task.author_id != current_user.user_id and current_user.role_id != 2:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    task = await db.get(Task, task_id)
+    if not task or task.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
 
-    if title:
-        task.title = title
-    if description:
-        task.description = description
-    if priority:
-        task.priority = priority
-    if due_date:
-        task.due_date = due_date.replace(tzinfo=None)
-    if assignee_id:
-        result = await db.execute(select(User).where(User.user_id == assignee_id, User.is_deleted == False))
-        if not result.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Assignee not found")
-        task.assignee_id = assignee_id
+    # Проверка прав
+    if current_user.role_id != 2 and task.author_id != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
 
-    db.add(TaskHistory(task_id=task.id, user_id=current_user.user_id, event="update"))
-    
-    for image in images:
-        file_path = f"{settings.UPLOAD_DIR}/task_{task.id}_{image.filename}"
-        async with aiofiles.open(file_path, 'wb') as out_file:
-            content = await image.read()
-            await out_file.write(content)
-        db.add(TaskHistory(task_id=task.id, user_id=current_user.user_id, event="image_create"))
-    
-    await db.commit()
-    await db.refresh(task)
-    return task
+    # Обновление полей
+    update_data = task_data.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == "due_date" and value:
+            value = value.replace(tzinfo=None)
+        setattr(task, field, value)
 
-@router.put("/{id}/status", response_model=TaskResponse)
+    # Запись изменений в историю
+    history_entry = TaskHistory(
+        task_id=task_id,
+        user_id=current_user.user_id,
+        event="TASK_UPDATED",
+        changes=update_data
+    )
+    
+    try:
+        db.add(history_entry)
+        await db.commit()
+        await db.refresh(task)
+        return task
+    
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.patch("/{task_id}/status", response_model=TaskResponse)
 async def update_task_status(
-    id: int,
-    status: TaskStatus,
+    task_id: int,
+    new_status: TaskStatus,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    result = await db.execute(select(Task).where(Task.id == id, Task.is_deleted == False))
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    if status == TaskStatus.POSTPONED and task.status != TaskStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="Can only postpone from ACTIVE")
-    if status == TaskStatus.COMPLETED and task.status not in [TaskStatus.ACTIVE, TaskStatus.POSTPONED]:
-        raise HTTPException(status_code=400, detail="Can only complete from ACTIVE or POSTPONED")
-    if status == TaskStatus.ACTIVE and task.status not in [TaskStatus.POSTPONED, TaskStatus.COMPLETED]:
-        raise HTTPException(status_code=400, detail="Can only return to work from POSTPONED or COMPLETED")
-    
-    task.status = status
-    db.add(TaskHistory(task_id=id, user_id=current_user.user_id, event="status_update"))
-    await db.commit()
-    await db.refresh(task)
-    return task
+    task = await db.get(Task, task_id)
+    if not task or task.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
 
-@router.get("/counts", response_model=dict)
-async def get_task_counts(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    result = await db.execute(select(Task.status, func.count()).where(Task.is_deleted == False).group_by(Task.status))
-    counts = {row[0]: row[1] for row in result.all()}
-    return {
-        "current": counts.get("ACTIVE", 0),
-        "postponed": counts.get("POSTPONED", 0),
-        "completed": counts.get("COMPLETED", 0)
+    # Валидация перехода статусов
+    valid_transitions = {
+        TaskStatus.ACTIVE: [TaskStatus.POSTPONED, TaskStatus.COMPLETED],
+        TaskStatus.POSTPONED: [TaskStatus.ACTIVE, TaskStatus.COMPLETED],
+        TaskStatus.COMPLETED: [TaskStatus.ACTIVE]
     }
+    
+    if new_status not in valid_transitions[task.status]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid status transition from {task.status} to {new_status}"
+        )
+
+    # Запись в историю
+    history_entry = TaskHistory(
+        task_id=task_id,
+        user_id=current_user.user_id,
+        event="STATUS_CHANGED",
+        changes={
+            "status": {
+                "old": task.status.value,
+                "new": new_status.value
+            }
+        }
+    )
+    
+    task.status = new_status
+    db.add(history_entry)
+    
+    try:
+        await db.commit()
+        await db.refresh(task)
+        return task
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.get("/{task_id}/history", response_model=List[TaskHistoryResponse])
+async def get_task_history(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    task = await db.get(Task, task_id)
+    if not task or task.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    result = await db.execute(
+        select(TaskHistory)
+        .where(TaskHistory.task_id == task_id)
+        .order_by(TaskHistory.created_at.desc())
+    )
+    return result.scalars().all()
+
+@router.get("/stats", response_model=dict)
+async def get_task_statistics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(
+        select(
+            Task.status,
+            func.count(Task.id),
+            func.sum(case((Task.priority == TaskPriority.HIGH, 1), else_=0)),
+            func.sum(case((Task.priority == TaskPriority.MEDIUM, 1), else_=0)),
+            func.sum(case((Task.priority == TaskPriority.LOW, 1), else_=0))
+        )
+        .where(Task.is_deleted == False)
+        .group_by(Task.status)
+    )
+    
+    stats = {}
+    for row in result.all():
+        stats[row[0].value] = {
+            "total": row[1],
+            "high_priority": row[2],
+            "medium_priority": row[3],
+            "low_priority": row[4]
+        }
+    
+    return stats

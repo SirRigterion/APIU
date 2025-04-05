@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, TIMESTAMP
+from sqlalchemy import Column, DateTime, Integer, String, Boolean, ForeignKey, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from src.db.database import Base
@@ -8,17 +8,20 @@ from src.task.enums import TaskPriority, TaskStatus
 # Пользователи
 class User(Base):
     __tablename__ = "users"
-    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    full_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(1024), nullable=False)
-    avatar: Mapped[str] = mapped_column(String(255), nullable=True)
-    role_id: Mapped[int] = mapped_column(ForeignKey("roles.role_id"), default=1)
-    registered_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=func.now())
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
-    deleted_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=True)
-    role = relationship("Role")
+    
+    user_id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False)
+    full_name = Column(String(100), nullable=False)
+    email = Column(String(100), unique=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    role_id = Column(Integer, ForeignKey("roles.role_id"), default=1)
+    registered_at = Column(DateTime, default=func.now())
+    avatar_url = Column(String(255), nullable=True)
+    completed_tasks_count = Column(Integer, default=0, nullable=False)
+    total_tasks_count = Column(Integer, default=0, nullable=False)
+    edited_articles_count = Column(Integer, default=0, nullable=False)
+    is_deleted = Column(Boolean, default=False)
+    deleted_at = Column(DateTime, nullable=True)
 
 # Роли
 class Role(Base):
@@ -92,28 +95,3 @@ class TaskHistory(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     event: Mapped[str] = mapped_column(String(50))
     changed_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=func.now())
-
-# Чаты
-class Chat(Base):
-    __tablename__ = "chats"
-    chat_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=func.now())
-
-# Участники чата
-class ChatMember(Base):
-    __tablename__ = "chat_members"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.chat_id"))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
-    joined_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=func.now())
-
-# Сообщения
-class Message(Base):
-    __tablename__ = "messages"
-    message_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.chat_id"))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
-    content: Mapped[str] = mapped_column(String(2000), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=func.now())
-    user = relationship("User")

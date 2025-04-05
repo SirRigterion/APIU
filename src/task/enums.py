@@ -1,11 +1,11 @@
 from enum import Enum
 
 class TaskStatus(str, Enum):
-    ACTIVE = "ACTIVE"
-    POSTPONED = "POSTPONED"
-    COMPLETED = "COMPLETED"
+    ACTIVE = "Текущие"
+    POSTPONED = "Отложенные"
+    COMPLETED = "Выполненные"
 
 class TaskPriority(str, Enum):
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
-    HIGH = "HIGH"
+    LOW = "Низкий"
+    MEDIUM = "Средний"
+    HIGH = "Высокий"

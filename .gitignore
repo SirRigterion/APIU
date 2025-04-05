@@ -25,7 +25,8 @@ MANIFEST
 venv/
 .env/
 .venv/
-
+vnev/
+.vnev/
 # IDE
 .vscode/
 .idea/

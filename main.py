@@ -1,13 +1,11 @@
 from fastapi import FastAPI
 from src.auth.routes import router as auth_router
 from src.user.routes import router as user_router
-from src.chat.routes import router as chat_router
 from src.article.routes import router as article_router
 from src.task.routes import router as task_router
 from src.admin.routes import router as admin_router
 from src.db.database import engine, startup as db_startup
 from src.db.models import Role, User
-from src.task.enums import TaskStatus, TaskPriority
 from sqlalchemy.future import select
 from src.auth.routes import hash_password
 from src.core.config import settings
@@ -24,7 +22,6 @@ app = FastAPI(title=settings.PROJECT_NAME, version=settings.PROJECT_VERSION)
 
 app.include_router(auth_router)
 app.include_router(user_router)
-app.include_router(chat_router)
 app.include_router(article_router)
 app.include_router(task_router)
 app.include_router(admin_router)
