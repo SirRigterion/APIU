@@ -9,6 +9,7 @@ class UserProfile(BaseModel):
     email: str
     avatar_url: Optional[str] = None
     role_id: int
+    shift: str
     registered_at: datetime
     completed_tasks_count: int
     total_tasks_count: int
@@ -33,6 +34,7 @@ class UserUpdate(BaseModel):
         pattern=r"^[а-яА-ЯёЁ\s\-]+$"
     )
     email: Optional[EmailStr] = Field(None)
+    shift: str
 
 class UserSearch(BaseModel):
     limit: int = 10  

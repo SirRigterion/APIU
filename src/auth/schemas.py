@@ -6,6 +6,7 @@ class UserCreate(BaseModel):
     full_name: str = "Иван Иванович Иванов"
     email: EmailStr = "user@example.com"
     password: str = "string111"
+    shift: str = "Первая"
 
     @validator('username')
     def validate_username(cls, value):
