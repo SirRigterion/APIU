@@ -96,3 +96,4 @@ class TaskHistory(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     event: Mapped[str] = mapped_column(String(50))
     changed_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=func.now())
+

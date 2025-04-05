@@ -29,7 +29,7 @@ def set_auth_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         key="access_token",
         value=token,
-        httponly=True,
+        httponly=False,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         expires=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
