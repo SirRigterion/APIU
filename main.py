@@ -81,7 +81,8 @@ async def startup():
                         "full_name": "Админ Админов",
                         "email": "admin@example.com",
                         "hashed_password": hashed_password,
-                        "role_id": 2
+                        "role_id": 2,
+                        "shift": "admin_shift" 
                     })
                 )
                 logger.info("Стандартный администратор успешно создан")
