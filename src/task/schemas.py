@@ -10,6 +10,11 @@ class TaskCreate(BaseModel):
     due_date: Optional[datetime]
     assignee_id: int
 
+class UserInfo(BaseModel):
+    user_id: int
+    full_name: str
+    shift: str
+
 class TaskResponse(BaseModel):
     id: int
     title: str
@@ -17,13 +22,10 @@ class TaskResponse(BaseModel):
     status: TaskStatus
     priority: TaskPriority
     due_date: Optional[datetime]
-    author_id: int
-    assignee_id: int
+    author: UserInfo
+    assignee: UserInfo
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 class TaskHistoryResponse(BaseModel):
     event: str
@@ -42,3 +44,7 @@ class TaskUpdate(TaskCreate):
     due_date: Optional[datetime] = None
     assignee_id: Optional[int] = None
     status: Optional[TaskStatus] = None
+
+class ReassignTaskRequest(BaseModel):
+    new_assignee_id: int
+    comment: Optional[str] = None

@@ -22,6 +22,7 @@ class User(Base):
     edited_articles_count = Column(Integer, default=0, nullable=False)
     is_deleted = Column(Boolean, default=False)
     deleted_at = Column(DateTime, nullable=True)
+    shift = Column(String(50), nullable=False, comment="Текущая смена пользователя")
 
 # Роли
 class Role(Base):

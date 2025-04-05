@@ -1,13 +1,13 @@
 from datetime import datetime
 from uuid import uuid4
-from fastapi import APIRouter, Depends, HTTPException, Body, File, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Body, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import case, func, update
 from src.auth.auth import get_current_user
 from src.db.models import User, Task, TaskHistory
 from src.db.database import get_db
-from src.task.schemas import TaskCreate, TaskUpdate, TaskResponse, TaskStatus, TaskHistoryResponse
+from src.task.schemas import ReassignTaskRequest, TaskCreate, TaskUpdate, TaskResponse, TaskStatus, TaskHistoryResponse
 from typing import Optional, List
 import aiofiles
 from src.core.config import settings
@@ -201,3 +201,125 @@ async def get_task_history(
         .limit(limit)
     )
     return result.scalars().all()
+
+# Новые маршруты
+@router.get("/my", response_model=List[TaskResponse])
+async def get_my_tasks(
+    status: Optional[TaskStatus] = None,
+    priority: Optional[TaskPriority] = None,
+    shift: Optional[str] = Query(None, description="Фильтр по смене"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Получить задачи текущего пользователя (как автора и исполнителя)
+    с фильтрацией по смене
+    """
+    query = select(Task).where(
+        (Task.is_deleted == False) &
+        ((Task.author_id == current_user.user_id) | 
+         (Task.assignee_id == current_user.user_id))
+    )
+
+    if status:
+        query = query.where(Task.status == status)
+    if priority:
+        query = query.where(Task.priority == priority)
+    if shift:
+        query = query.join(User, Task.assignee_id == User.user_id).where(User.shift == shift)
+
+    result = await db.execute(query.order_by(Task.due_date.asc()))
+    return result.scalars().all()
+
+@router.get("/shift", response_model=List[TaskResponse])
+async def get_shift_tasks(
+    shift: str = Query(..., description="Идентификатор смены"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Получить задачи для текущей смены пользователя
+    """
+    # Проверяем к какой смене относится пользователь
+    user_shift = await db.execute(
+        select(User.shift).where(User.user_id == current_user.user_id)
+    )
+    user_shift = user_shift.scalar()
+    
+    if not user_shift:
+        raise HTTPException(status_code=400, detail="User shift not defined")
+
+    query = select(Task).join(User, Task.assignee_id == User.user_id).where(
+        (Task.is_deleted == False) &
+        (User.shift == user_shift) &
+        (Task.status != TaskStatus.COMPLETED)
+    )
+
+    result = await db.execute(query.order_by(Task.priority.desc(), Task.due_date.asc()))
+    return result.scalars().all()
+
+@router.patch("/{task_id}/reassign", response_model=TaskResponse)
+async def reassign_task(
+    task_id: int,
+    reassign_data: ReassignTaskRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Передача задачи другому сотруднику в рамках смены
+    """
+    # Получаем задачу
+    task = await db.get(Task, task_id)
+    if not task or task.is_deleted:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Проверяем права (только автор или админ)
+    if current_user.role_id != ADMIN_ROLE_ID and task.author_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    # Проверяем нового исполнителя
+    new_assignee = await db.execute(
+        select(User).where(
+            User.user_id == reassign_data.new_assignee_id,
+            User.is_deleted == False
+        )
+    )
+    new_assignee = new_assignee.scalar_one_or_none()
+    
+    if not new_assignee:
+        raise HTTPException(status_code=404, detail="New assignee not found")
+
+    # Проверяем что новый исполнитель из той же смены
+    if new_assignee.shift != current_user.shift:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot reassign to another shift"
+        )
+
+    # Фиксируем изменения
+    old_assignee_id = task.assignee_id
+    task.assignee_id = reassign_data.new_assignee_id
+
+    # Запись в историю
+    history_entry = TaskHistory(
+        task_id=task_id,
+        user_id=current_user.user_id,
+        event="REASSIGNED",
+        changes={
+            "old_assignee": old_assignee_id,
+            "new_assignee": reassign_data.new_assignee_id,
+            "comment": reassign_data.comment
+        }
+    )
+
+    try:
+        db.add(history_entry)
+        await db.commit()
+        await db.refresh(task)
+        return task
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Reassignment failed: {str(e)}"
+        )
