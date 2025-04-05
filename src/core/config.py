@@ -7,7 +7,7 @@ load_dotenv()
 
 class Settings:
     PROJECT_NAME: str = "APITTK"
-    PROJECT_VERSION: str = "3.0"
+    PROJECT_VERSION: str = "3.2"
     POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
     POSTGRES_PASSWORD: Optional[str] = os.getenv("POSTGRES_PASSWORD")
     POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "localhost")

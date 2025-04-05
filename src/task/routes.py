@@ -1,7 +1,7 @@
 import os
 from typing import List, Optional
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,8 +10,9 @@ from src.auth.auth import get_current_user
 from src.db.models import Task, TaskHistory, User
 from src.db.database import get_db
 from src.core.config import settings
-from task.enums import TaskPriority, TaskStatus
-from task.schemas import ReassignTaskRequest, TaskHistoryResponse, TaskResponse
+from src.task.enums import TaskPriority, TaskStatus
+from src.task.schemas import ReassignTaskRequest, TaskHistoryResponse, TaskResponse
+from sqlalchemy.orm import selectinload
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 ADMIN_ROLE_ID = 2
@@ -45,6 +46,8 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    if due_date:
+        due_date = due_date.astimezone(timezone.utc).replace(tzinfo=None)
     try:
         await verify_assignee(db, assignee_id)
         
@@ -70,11 +73,16 @@ async def create_task(
                     changes={"image": file_path}
                 ))
 
+
+        history_task_data = task_data.copy()
+        if history_task_data["due_date"]:
+            history_task_data["due_date"] = history_task_data["due_date"].isoformat()
+
         db.add(TaskHistory(
             task_id=task.id,
             user_id=current_user.user_id,
             event="TASK_CREATED",
-            changes=task_data
+            changes=history_task_data
         ))
         
         await db.commit()
@@ -83,7 +91,7 @@ async def create_task(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Ошибка при создании задачи: {str(e)}")
-
+    
 @router.put("/{task_id}", response_model=TaskResponse)
 async def update_task(
     task_id: int = Path(...),
@@ -120,7 +128,10 @@ async def update_task(
         if due_date is not None:
             new_due = due_date.replace(tzinfo=None)
             if task.due_date != new_due:
-                changes["due_date"] = {"old": task.due_date, "new": new_due}
+                changes["due_date"] = {
+                    "old": task.due_date.isoformat() if task.due_date else None,
+                    "new": new_due.isoformat()
+                }
                 task.due_date = new_due
 
         if images:
@@ -150,7 +161,7 @@ async def update_task(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Ошибка при обновлении задачи: {str(e)}")
-
+    
 @router.delete("/{task_id}", response_model=dict)
 async def delete_task(
     task_id: int = Path(...),
@@ -183,7 +194,7 @@ async def delete_task(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Ошибка при удалении задачи: {str(e)}")
-
+    
 @router.get("/{task_id}/history", response_model=List[TaskHistoryResponse])
 async def get_task_history(
     task_id: int = Path(...),
@@ -258,50 +269,50 @@ async def get_shift_tasks(
 
 @router.patch("/{task_id}/reassign", response_model=TaskResponse)
 async def reassign_task(
+    request: ReassignTaskRequest,
     task_id: int = Path(...),
-    request: ReassignTaskRequest = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    try:
-        result = await db.execute(
-            select(Task).where(Task.id == task_id, Task.is_deleted == False)
-        )
-        task = result.scalar_one_or_none()
-        if not task:
-            raise HTTPException(status_code=404, detail="Задача не найдена")
-        
-        if current_user.role_id != ADMIN_ROLE_ID and task.author_id != current_user.user_id:
-            raise HTTPException(status_code=403, detail="Недостаточно прав")
-        
-        new_assignee = await verify_assignee(db, request.new_assignee_id)
-        current_shift = (await db.execute(
-            select(User.shift).where(User.user_id == task.assignee_id)
-        )).scalar()
-        
-        if new_assignee.shift != current_shift:
-            raise HTTPException(status_code=400, detail="Нельзя переназначить на другую смену")
-        
-        old_assignee = task.assignee_id
-        task.assignee_id = request.new_assignee_id
-        
-        db.add(TaskHistory(
-            task_id=task.id,
-            user_id=current_user.user_id,
-            event="REASSIGNED",
-            changes={
-                "old_assignee": old_assignee,
-                "new_assignee": request.new_assignee_id,
-                "comment": request.comment
-            }
-        ))
-        
-        await db.commit()
-        await db.refresh(task)
-        return task
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Ошибка при переназначении задачи: {str(e)}")
+    # Получаем задачу с загруженными связями
+    result = await db.execute(
+        select(Task)
+        .options(selectinload(Task.assignee), selectinload(Task.author))
+        .where(Task.id == task_id, Task.is_deleted == False)
+    )
+    task = result.scalar_one_or_none()
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    
+    # Проверка прав
+    if current_user.role_id != ADMIN_ROLE_ID and task.author_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    
+    # Проверка нового исполнителя
+    await verify_assignee(db, request.new_assignee_id)
+    
+    # Фиксируем изменения
+    changes = {
+        "assignee_id": {
+            "old": task.assignee_id,
+            "new": request.new_assignee_id
+        }
+    }
+    task.assignee_id = request.new_assignee_id
+    
+    # Добавляем запись в историю
+    db.add(TaskHistory(
+        task_id=task.id,
+        user_id=current_user.user_id,
+        event="TASK_REASSIGNED",
+        changes=changes,
+        comment=request.comment
+    ))
+    
+    await db.commit()
+    await db.refresh(task)
+    return task
 
 @router.post("/{task_id}/restore", response_model=TaskResponse)
 async def restore_task(

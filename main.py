@@ -23,10 +23,22 @@ app = FastAPI(title=settings.PROJECT_NAME, version=settings.PROJECT_VERSION)
 # Пример настроек CORS в FastAPI
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001"],
+    allow_origins=[
+        # Локальные адреса для разработки
+        "http://localhost:3001",
+        "http://localhost:3000",
+        
+        # Реальные IP-адреса
+        "http://150.241.71.43:3001",
+        "http://188.162.141.21",
+        
+        # Дополнительно для удобства разработки (опционально)
+        "http://localhost",  # Без порта
+        r"http://localhost:\d+",  # Все порты localhost
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Разрешить все методы
+    allow_headers=["*"],  # Разрешить все заголовки
 )
 
 

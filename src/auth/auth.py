@@ -36,12 +36,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 def set_auth_cookie(response: Response, token: str) -> None:
     """Установка куки с токеном."""
     response.set_cookie(
-        key="access_token",
+        key=token,
         value=token,
         httponly=False,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         expires=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        samesite="lax",
+        samesite="none",
         secure=False
     )
 

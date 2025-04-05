@@ -1,8 +1,8 @@
-"""Project v 2.1 worked
+"""Project v 3.1 worked
 
-Revision ID: efc9615f46b0
+Revision ID: c202d8e387d1
 Revises: 
-Create Date: 2025-04-05 15:55:40.622375
+Create Date: 2025-04-05 21:13:14.219254
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'efc9615f46b0'
+revision: str = 'c202d8e387d1'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -32,14 +32,14 @@ def upgrade() -> None:
     sa.Column('full_name', sa.String(length=100), nullable=False),
     sa.Column('email', sa.String(length=100), nullable=False),
     sa.Column('hashed_password', sa.String(length=255), nullable=False),
-    sa.Column('role_id', sa.Integer(), nullable=True),
-    sa.Column('registered_at', sa.DateTime(), nullable=True),
+    sa.Column('role_id', sa.Integer(), nullable=False),
+    sa.Column('registered_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('avatar_url', sa.String(length=255), nullable=True),
     sa.Column('completed_tasks_count', sa.Integer(), nullable=False),
     sa.Column('total_tasks_count', sa.Integer(), nullable=False),
     sa.Column('edited_articles_count', sa.Integer(), nullable=False),
-    sa.Column('is_deleted', sa.Boolean(), nullable=True),
-    sa.Column('deleted_at', sa.DateTime(), nullable=True),
+    sa.Column('is_deleted', sa.Boolean(), nullable=False),
+    sa.Column('deleted_at', sa.TIMESTAMP(), nullable=True),
     sa.Column('shift', sa.String(length=50), nullable=False, comment='Текущая смена пользователя'),
     sa.ForeignKeyConstraint(['role_id'], ['roles.role_id'], ),
     sa.PrimaryKeyConstraint('user_id'),
@@ -52,8 +52,8 @@ def upgrade() -> None:
     sa.Column('title', sa.String(length=255), nullable=False),
     sa.Column('content', sa.String(length=5000), nullable=False),
     sa.Column('author_id', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.TIMESTAMP(), nullable=False),
-    sa.Column('updated_at', sa.TIMESTAMP(), nullable=False),
+    sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('is_deleted', sa.Boolean(), nullable=False),
     sa.Column('deleted_at', sa.TIMESTAMP(), nullable=True),
     sa.ForeignKeyConstraint(['author_id'], ['users.user_id'], ),
@@ -68,7 +68,8 @@ def upgrade() -> None:
     sa.Column('due_date', sa.TIMESTAMP(), nullable=True),
     sa.Column('author_id', sa.Integer(), nullable=False),
     sa.Column('assignee_id', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.TIMESTAMP(), nullable=False),
+    sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('is_deleted', sa.Boolean(), nullable=False),
     sa.Column('deleted_at', sa.TIMESTAMP(), nullable=True),
     sa.ForeignKeyConstraint(['assignee_id'], ['users.user_id'], ),
@@ -80,7 +81,11 @@ def upgrade() -> None:
     sa.Column('article_id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('event', sa.String(length=50), nullable=False),
-    sa.Column('changed_at', sa.TIMESTAMP(), nullable=False),
+    sa.Column('changed_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('old_title', sa.String(length=255), nullable=True),
+    sa.Column('new_title', sa.String(length=255), nullable=True),
+    sa.Column('old_content', sa.String(length=5000), nullable=True),
+    sa.Column('new_content', sa.String(length=5000), nullable=True),
     sa.ForeignKeyConstraint(['article_id'], ['articles.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ),
     sa.PrimaryKeyConstraint('id')
@@ -97,7 +102,8 @@ def upgrade() -> None:
     sa.Column('task_id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('event', sa.String(length=50), nullable=False),
-    sa.Column('changed_at', sa.TIMESTAMP(), nullable=False),
+    sa.Column('changed_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('changes', sa.JSON(), nullable=True),
     sa.ForeignKeyConstraint(['task_id'], ['tasks.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ),
     sa.PrimaryKeyConstraint('id')

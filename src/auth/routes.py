@@ -67,7 +67,7 @@ async def logout():
         response.delete_cookie(
             key="access_token",
             httponly=False,
-            samesite="lax",
+            samesite="none",
             secure=False
         )
         logger.info("Пользователь успешно вышел из системы")
