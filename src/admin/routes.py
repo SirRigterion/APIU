@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-import aioredis
+from redis import asyncio as aioredis
+from redis.asyncio import Redis
 import json
 from src.auth.auth import get_current_user
 from src.auth.routes import hash_password

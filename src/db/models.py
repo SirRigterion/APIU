@@ -4,8 +4,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from sqlalchemy import Enum as SAEnum
 from datetime import datetime
-from src.db.database import Base
+from src.db.database import DeclarativeBase
 from src.task.enums import TaskPriority, TaskStatus
+
+class Base(DeclarativeBase):
+    def dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
 # Пользователи
 class User(Base):
@@ -28,7 +32,16 @@ class User(Base):
     
     authored_tasks = relationship("Task", back_populates="author", foreign_keys="Task.author_id")
     assigned_tasks = relationship("Task", back_populates="assignee", foreign_keys="Task.assignee_id")
-
+    def to_dict(self):
+        return {
+            "user_id": self.user_id,
+            "username": self.username,
+            "email": self.email,
+            "full_name": self.full_name,
+            "avatar_url": self.avatar_url,
+            "shift": self.shift,
+            "role_id": self.role_id
+        }
 # Роли
 class Role(Base):
     __tablename__ = "roles"

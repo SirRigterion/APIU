@@ -6,7 +6,8 @@ import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-import aioredis
+from redis import asyncio as aioredis
+from redis.asyncio import Redis
 import json
 from src.auth.auth import get_current_user
 from src.db.models import User, Article, ArticleHistory, ArticleImage

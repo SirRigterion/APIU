@@ -16,6 +16,7 @@ class Settings:
     SECRET_KEY: str = os.getenv("SECRET_KEY", "secret-key-placeholder")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
+    CACHE_EXPIRE_SECONDS: int = int(os.getenv("CACHE_EXPIRE_SECONDS", 10))
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
     UPLOAD_DIR:  str = os.getenv("UPLOAD_DIR", "redis://localhost:6379")
     @property

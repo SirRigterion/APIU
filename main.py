@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from src.auth.routes import router as auth_router
 from src.user.routes import router as user_router
@@ -12,8 +12,8 @@ from src.auth.routes import hash_password
 from src.core.config import settings
 import logging
 import asyncio
-import aioredis
-
+from redis import asyncio as aioredis
+from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -63,67 +63,50 @@ async def wait_for_db(max_attempts=10, delay=2):
                 raise Exception("Не удалось подключиться к базе данных после всех попыток")
             await asyncio.sleep(delay)
         attempt += 1
-async def wait_for_redis(max_attempts=5, delay=1):
-    attempt = 1
-    while attempt <= max_attempts:
-        try:
-            redis = await aioredis.from_url(settings.REDIS_URL)
-            await redis.ping()
-            logger.info("Redis доступен")
-            return redis
-        except Exception as e:
-            logger.warning(f"Попытка {attempt}/{max_attempts} подключения к Redis не удалась: {e}")
-            if attempt == max_attempts:
-                raise Exception("Не удалось подключиться к Redis после всех попыток")
-            await asyncio.sleep(delay)
-        attempt += 1
+
+
+async def get_redis(request: Request) -> Redis:
+    return request.app.state.redis
 
 @app.on_event("startup")
 async def startup():
-    logger.info("Запуск приложения начат")
-    try:
-        await wait_for_db()
-        
-        # Инициализация Redis
-        app.state.redis = await wait_for_redis()
+    app.state.redis = Redis.from_url(settings.REDIS_URL)
+    await app.state.redis.ping()
+    async with engine.begin() as conn:
+        result = await conn.execute(select(Role))
+        roles = result.fetchall()
+        if not roles:
+            await conn.execute(
+                Role.__table__.insert().values([
+                    {"role_id": 1, "role_name": "пользователь"},
+                    {"role_id": 2, "role_name": "администратор"}
+                ])
+            )
+            logger.info("Роли по умолчанию успешно созданы")
+        else:
+            logger.info("Роли уже существуют")
 
-        async with engine.begin() as conn:
-            result = await conn.execute(select(Role))
-            roles = result.fetchall()
-            if not roles:
-                await conn.execute(
-                    Role.__table__.insert().values([
-                        {"role_id": 1, "role_name": "пользователь"},
-                        {"role_id": 2, "role_name": "администратор"}
-                    ])
-                )
-                logger.info("Роли по умолчанию успешно созданы")
-            else:
-                logger.info("Роли уже существуют")
-
-            result = await conn.execute(select(User).where(User.email == "admin@example.com"))
-            admin_user = result.scalar_one_or_none()
-            if not admin_user:
-                hashed_password = hash_password("string111")
-                await conn.execute(
-                    User.__table__.insert().values({
-                        "username": "admin",
-                        "full_name": "Админ Админов",
-                        "email": "admin@example.com",
-                        "hashed_password": hashed_password,
-                        "role_id": 2,
-                        "shift": "admin_shift" 
-                    })
-                )
-                logger.info("Стандартный администратор успешно создан")
-            else:
-                logger.info("Стандартный администратор уже существует")
+        result = await conn.execute(select(User).where(User.email == "admin@example.com"))
+        admin_user = result.scalar_one_or_none()
+        if not admin_user:
+            hashed_password = hash_password("string111")
+            await conn.execute(
+                User.__table__.insert().values({
+                    "username": "admin",
+                    "full_name": "Админ Админов",
+                    "email": "admin@example.com",
+                    "hashed_password": hashed_password,
+                    "role_id": 2,
+                    "shift": "admin_shift" 
+                })
+            )
+            logger.info("Стандартный администратор успешно создан")
+        else:
+            logger.info("Стандартный администратор уже существует")
 
         await db_startup()
         logger.info("Приложение успешно запущено")
-    except Exception as e:
-        logger.error(f"Ошибка при запуске приложения: {e}")
-        raise
+
 
 @app.on_event("shutdown")
 async def shutdown():

@@ -11,7 +11,8 @@ from src.db.models import User
 from src.user.schemas import UserProfile, UserUpdate
 import aiofiles
 from src.core.config import settings
-import aioredis
+from redis import asyncio as aioredis
+from redis.asyncio import Redis
 import json
 
 logger = logging.getLogger(__name__)
@@ -38,16 +39,32 @@ async def get_user_update(
 @router.get("/profile", response_model=UserProfile)
 async def get_profile(
     current_user: User = Depends(get_current_user),
-    redis: aioredis.Redis = Depends(get_redis)
+    redis: Redis = Depends(get_redis)
 ):
     """Получение профиля текущего пользователя."""
-    # Кэширование профиля
     redis_key = f"user_profile:{current_user.user_id}"
     cached_profile = await redis.get(redis_key)
+    
     if cached_profile:
         return json.loads(cached_profile)
     
-    await redis.setex(redis_key, settings.CACHE_EXPIRE_SECONDS, json.dumps(current_user.__dict__))
+    # Сериализуем только нужные поля
+    user_data = {
+        "user_id": current_user.user_id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "avatar_url": current_user.avatar_url,
+        "shift": current_user.shift,
+        "role_id": current_user.role_id
+    }
+    
+    await redis.setex(
+        redis_key, 
+        settings.CACHE_EXPIRE_SECONDS, 
+        json.dumps(user_data)
+    )
+    
     return current_user
 
 @router.put("/profile", response_model=UserProfile)

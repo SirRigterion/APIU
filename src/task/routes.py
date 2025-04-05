@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
-import aioredis
+from redis import asyncio as aioredis
+from redis.asyncio import Redis
 import json
 
 from src.auth.auth import get_current_user

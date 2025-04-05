@@ -2,7 +2,8 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-import aioredis
+from redis import asyncio as aioredis
+from redis.asyncio import Redis
 
 from src.db.database import get_db
 from src.auth.schemas import UserCreate, UserLogin
