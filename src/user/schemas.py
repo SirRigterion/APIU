@@ -22,19 +22,19 @@ class UserProfile(BaseModel):
 
 class UserUpdate(BaseModel):
     username: Optional[str] = Field(
-        None, 
+        default="user",
         min_length=3, 
         max_length=50,
         pattern=r"^[a-zA-Z0-9_]+$"
     )
     full_name: Optional[str] = Field(
-        None,
+        default="Иванов Иванович",
         min_length=2,
         max_length=100,
         pattern=r"^[а-яА-ЯёЁ\s\-]+$"
     )
-    email: Optional[EmailStr] = Field(None)
-    shift: str
+    email: Optional[EmailStr] = Field(default="user@example.com")  # Значение по умолчанию
+    shift: str = Field(default="Первая")
 
 class UserSearch(BaseModel):
     limit: int = 10  

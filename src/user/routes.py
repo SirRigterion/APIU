@@ -20,15 +20,13 @@ async def get_profile(current_user: User = Depends(get_current_user)):
 
 @router.put("/profile", response_model=UserProfile)
 async def update_profile(
-    user_update: str = Form(...),  # Принимаем JSON-строку из формы
+    user_update: UserUpdate = Form(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     photo: UploadFile = File(None)
 ):
     try:
-        # Парсим JSON-строку в словарь
         user_update_dict = json.loads(user_update)
-        # Преобразуем в объект Pydantic
         user_update_obj = UserUpdate(**user_update_dict)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format")
