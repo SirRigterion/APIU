@@ -15,7 +15,7 @@ class Settings:
     POSTGRES_DB: str = os.getenv("POSTGRES_DB", "app_db")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "secret-key-placeholder")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
     UPLOAD_DIR:  str = os.getenv("UPLOAD_DIR", "redis://localhost:6379")
     @property
