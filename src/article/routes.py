@@ -14,7 +14,6 @@ from src.article.schemas import ArticleResponse, ArticleHistoryResponse
 
 router = APIRouter(prefix="/articles", tags=["articles"])
 
-# Общая функция для сохранения изображений
 async def save_uploaded_file(file: UploadFile, article_id: int, upload_dir: str) -> str:
     file_ext = os.path.splitext(file.filename)[1]
     unique_name = f"{uuid.uuid4().hex}{file_ext}"
@@ -51,46 +50,39 @@ async def get_articles(
 
 @router.post("/", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
 async def create_article(
-    title: str = Form(..., min_length=3, max_length=200),
-    content: str = Form(...),
-    images: List[UploadFile] = File([]),
+    title: str = Form(..., min_length=3, max_length=255),
+    content: str = Form(..., max_length=5000),
+    images: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     try:
-        # Создаем статью
         article = Article(
             title=title,
             content=content,
             author_id=current_user.user_id
         )
         db.add(article)
-        await db.commit()
-        await db.refresh(article)
+        await db.flush()
 
-        # Сохранение изображений
         if images:
             os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
             for image in images:
                 file_path = await save_uploaded_file(image, article.id, settings.UPLOAD_DIR)
-                db.add(ArticleImage(article_id=article.id, image_path=file_path))
-            
-            await db.commit()
-            await db.refresh(article)
+                article_image = ArticleImage(article_id=article.id, image_path=file_path)
+                db.add(article_image)
 
-        # Запись в историю
         history_entry = ArticleHistory(
             article_id=article.id,
             user_id=current_user.user_id,
             event="CREATE",
-            old_title=None,
-            old_content=None,
             new_title=title,
             new_content=content
         )
         db.add(history_entry)
+        
         await db.commit()
-
+        await db.refresh(article)
         return article
 
     except Exception as e:
@@ -103,9 +95,9 @@ async def create_article(
 @router.put("/{article_id}", response_model=ArticleResponse)
 async def update_article(
     article_id: int,
-    title: Optional[str] = Form(None, min_length=3, max_length=200),
-    content: Optional[str] = Form(None),
-    images: List[UploadFile] = File([]),
+    title: Optional[str] = Form(default=None, min_length=3, max_length=255),
+    content: Optional[str] = Form(default=None, max_length=5000),
+    images: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -122,30 +114,33 @@ async def update_article(
         if article.author_id != current_user.user_id and current_user.role_id != 2:
             raise HTTPException(status_code=403, detail="Доступ запрещен")
 
-        # Фиксируем изменения для истории
-        changes = {}
-        if title is not None and title != article.title:
-            changes["title"] = {"old": article.title, "new": title}
-            article.title = title
-        
-        if content is not None and content != article.content:
-            changes["content"] = {"old": article.content, "new": content}
-            article.content = content
+        changes_made = False
+        old_title = article.title
+        old_content = article.content
 
-        # Сохранение изображений
+        if title is not None and title != article.title:
+            article.title = title
+            changes_made = True
+        if content is not None and content != article.content:
+            article.content = content
+            changes_made = True
+
         if images:
             os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
             for image in images:
                 file_path = await save_uploaded_file(image, article.id, settings.UPLOAD_DIR)
                 db.add(ArticleImage(article_id=article.id, image_path=file_path))
+            changes_made = True
 
-        # Запись в историю если есть изменения
-        if changes:
+        if changes_made:
             history_entry = ArticleHistory(
                 article_id=article.id,
                 user_id=current_user.user_id,
                 event="UPDATE",
-                changes=changes
+                old_title=old_title if title is not None and title != old_title else None,
+                new_title=title if title is not None and title != old_title else None,
+                old_content=old_content if content is not None and content != old_content else None,
+                new_content=content if content is not None and content != old_content else None
             )
             db.add(history_entry)
 
@@ -153,8 +148,6 @@ async def update_article(
         await db.refresh(article)
         return article
 
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         raise HTTPException(
@@ -184,20 +177,18 @@ async def delete_article(
         article.is_deleted = True
         article.deleted_at = datetime.utcnow()
         
-        # Запись в историю
         history_entry = ArticleHistory(
             article_id=article.id,
             user_id=current_user.user_id,
             event="DELETE",
-            changes={"status": "deleted"}
+            old_title=article.title,
+            old_content=article.content
         )
         db.add(history_entry)
         
         await db.commit()
         return {"message": "Статья успешно удалена"}
 
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         raise HTTPException(
@@ -234,12 +225,12 @@ async def restore_article(
         article.is_deleted = False
         article.deleted_at = None
         
-        # Запись в историю
         history_entry = ArticleHistory(
             article_id=article.id,
             user_id=current_user.user_id,
             event="RESTORE",
-            changes={"status": "restored"}
+            new_title=article.title,
+            new_content=article.content
         )
         db.add(history_entry)
         
@@ -247,8 +238,6 @@ async def restore_article(
         await db.refresh(article)
         return article
 
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         raise HTTPException(
@@ -264,26 +253,31 @@ async def get_article_history(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Проверка прав доступа к статье
-    result = await db.execute(
-        select(Article)
-        .where(Article.id == article_id)
-    )
-    article = result.scalar_one_or_none()
-    
-    if not article:
-        raise HTTPException(status_code=404, detail="Статья не найдена")
-    
-    if article.author_id != current_user.user_id and current_user.role_id != 2:
-        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    try:
+        result = await db.execute(
+            select(Article)
+            .where(Article.id == article_id)
+        )
+        article = result.scalar_one_or_none()
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="Статья не найдена")
+        
+        if article.author_id != current_user.user_id and current_user.role_id != 2:
+            raise HTTPException(status_code=403, detail="Доступ запрещен")
 
-    # Получение истории
-    result = await db.execute(
-        select(ArticleHistory)
-        .where(ArticleHistory.article_id == article_id)
-        .order_by(ArticleHistory.changed_at.desc())
-        .offset(offset)
-        .limit(limit)
-    )
-    
-    return result.scalars().all()
+        result = await db.execute(
+            select(ArticleHistory)
+            .where(ArticleHistory.article_id == article_id)
+            .order_by(ArticleHistory.changed_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        
+        return result.scalars().all()
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при получении истории статьи: {str(e)}"
+        )

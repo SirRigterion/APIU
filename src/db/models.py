@@ -1,3 +1,4 @@
+from typing import Optional
 from sqlalchemy import Column, DateTime, Integer, String, Boolean, ForeignKey, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -30,7 +31,7 @@ class Role(Base):
     role_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     role_name: Mapped[str] = mapped_column(String(50), nullable=False)
 
-# Статьи
+#Статьи 
 class Article(Base):
     __tablename__ = "articles"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -45,10 +46,10 @@ class Article(Base):
         nullable=False
     )
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
-    deleted_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
     images = relationship("ArticleImage", back_populates="article", lazy="selectin")
+    history = relationship("ArticleHistory", back_populates="article")
 
-# Изображения статей
 class ArticleImage(Base):
     __tablename__ = "article_images"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -56,7 +57,6 @@ class ArticleImage(Base):
     image_path: Mapped[str] = mapped_column(String(255), nullable=False)
     article = relationship("Article", back_populates="images")
 
-# История статей
 class ArticleHistory(Base):
     __tablename__ = "article_history"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -64,7 +64,11 @@ class ArticleHistory(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     event: Mapped[str] = mapped_column(String(50))
     changed_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=func.now())
-
+    old_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    new_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    old_content: Mapped[Optional[str]] = mapped_column(String(5000), nullable=True)
+    new_content: Mapped[Optional[str]] = mapped_column(String(5000), nullable=True)
+    article = relationship("Article", back_populates="history")
 # Задачи
 class Task(Base):
     __tablename__ = "tasks"
@@ -88,7 +92,6 @@ class Task(Base):
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=True)
 
-# История задач
 class TaskHistory(Base):
     __tablename__ = "task_history"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
