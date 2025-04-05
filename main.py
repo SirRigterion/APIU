@@ -12,6 +12,8 @@ from src.auth.routes import hash_password
 from src.core.config import settings
 import logging
 import asyncio
+import aioredis
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -21,24 +23,24 @@ logging.basicConfig(
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.PROJECT_VERSION)
 # Пример настроек CORS в FastAPI
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=[
-#         # Локальные адреса для разработки
-#         "http://localhost:3001",
-#         "http://localhost:3000",
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        # Локальные адреса для разработки
+        "http://localhost:3001",
+        "http://localhost:3000",
         
-#         "http://150.241.71.43:3001",
-#         "http://188.162.141.21",
+        "http://150.241.71.43:3001",
+        "http://188.162.141.21",
         
-#         "http://127.0.0.1",
-#         "http://localhost", 
-#         r"http://localhost:\d+"
-#     ],
-#     allow_credentials=True,
-#     allow_methods=["*"],  # Разрешить все методы
-#     allow_headers=["*"],  # Разрешить все заголовки
-# )
+        "http://127.0.0.1",
+        "http://localhost", 
+        r"http://localhost:\d+"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],  # Разрешить все методы
+    allow_headers=["*"],  # Разрешить все заголовки
+)
 
 
 app.include_router(auth_router)
@@ -61,12 +63,29 @@ async def wait_for_db(max_attempts=10, delay=2):
                 raise Exception("Не удалось подключиться к базе данных после всех попыток")
             await asyncio.sleep(delay)
         attempt += 1
+async def wait_for_redis(max_attempts=5, delay=1):
+    attempt = 1
+    while attempt <= max_attempts:
+        try:
+            redis = await aioredis.from_url(settings.REDIS_URL)
+            await redis.ping()
+            logger.info("Redis доступен")
+            return redis
+        except Exception as e:
+            logger.warning(f"Попытка {attempt}/{max_attempts} подключения к Redis не удалась: {e}")
+            if attempt == max_attempts:
+                raise Exception("Не удалось подключиться к Redis после всех попыток")
+            await asyncio.sleep(delay)
+        attempt += 1
 
 @app.on_event("startup")
 async def startup():
     logger.info("Запуск приложения начат")
     try:
         await wait_for_db()
+        
+        # Инициализация Redis
+        app.state.redis = await wait_for_redis()
 
         async with engine.begin() as conn:
             result = await conn.execute(select(Role))
@@ -111,7 +130,9 @@ async def shutdown():
     logger.info("Завершение работы приложения начато")
     try:
         await engine.dispose()
-        logger.info("Соединение с базой данных закрыто")
+        if hasattr(app.state, 'redis'):
+            await app.state.redis.close()
+            logger.info("Соединение с Redis закрыто")
     except Exception as e:
         logger.error(f"Ошибка при завершении работы приложения: {e}")
         raise

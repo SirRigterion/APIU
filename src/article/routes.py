@@ -3,9 +3,11 @@ import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
 import aiofiles
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+import aioredis
+import json
 from src.auth.auth import get_current_user
 from src.db.models import User, Article, ArticleHistory, ArticleImage
 from src.db.database import get_db
@@ -13,6 +15,19 @@ from src.core.config import settings
 from src.article.schemas import ArticleResponse, ArticleHistoryResponse
 
 router = APIRouter(prefix="/articles", tags=["articles"])
+
+async def get_redis(request: Request) -> aioredis.Redis:
+    return request.app.state.redis
+
+async def invalidate_article_cache(redis: aioredis.Redis, article_id: int):
+    keys = [
+        f"article:{article_id}",
+        f"article_history:{article_id}:*",
+        "articles_list:*"
+    ]
+    for pattern in keys:
+        async for key in redis.scan_iter(pattern):
+            await redis.delete(key)
 
 async def save_uploaded_file(file: UploadFile, article_id: int, upload_dir: str) -> str:
     file_ext = os.path.splitext(file.filename)[1]
@@ -31,8 +46,16 @@ async def get_articles(
     offset: int = 0,
     limit: int = 10,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    redis: aioredis.Redis = Depends(get_redis)
 ):
+    """Получение списка статей с кэшированием"""
+    cache_key = f"articles_list:{title}:{author_id}:{offset}:{limit}"
+    cached_data = await redis.get(cache_key)
+    
+    if cached_data:
+        return json.loads(cached_data)
+
     query = (
         select(Article)
         .where(Article.is_deleted == False)
@@ -46,7 +69,10 @@ async def get_articles(
         query = query.where(Article.author_id == author_id)
     
     result = await db.execute(query)
-    return result.scalars().all()
+    articles = result.scalars().all()
+    
+    await redis.setex(cache_key, 300, json.dumps([a.__dict__ for a in articles]))
+    return articles
 
 @router.post("/", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
 async def create_article(
@@ -54,8 +80,10 @@ async def create_article(
     content: str = Form(..., max_length=5000),
     images: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    redis: aioredis.Redis = Depends(get_redis)
 ):
+    """Создание новой статьи с инвалидацией кэша"""
     try:
         article = Article(
             title=title,
@@ -82,14 +110,14 @@ async def create_article(
         db.add(history_entry)
         
         await db.commit()
-        await db.refresh(article)
+        await invalidate_article_cache(redis, article.id)
         return article
 
     except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка при создании статьи: {str(e)}"
+            detail="Ошибка создания статьи"
         )
 
 @router.put("/{article_id}", response_model=ArticleResponse)
@@ -99,8 +127,10 @@ async def update_article(
     content: Optional[str] = Form(default=None, max_length=5000),
     images: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    redis: aioredis.Redis = Depends(get_redis)
 ):
+    """Обновление статьи с инвалидацией кэша"""
     try:
         result = await db.execute(
             select(Article)
@@ -137,30 +167,32 @@ async def update_article(
                 article_id=article.id,
                 user_id=current_user.user_id,
                 event="UPDATE",
-                old_title=old_title if title is not None and title != old_title else None,
-                new_title=title if title is not None and title != old_title else None,
-                old_content=old_content if content is not None and content != old_content else None,
-                new_content=content if content is not None and content != old_content else None
+                old_title=old_title,
+                new_title=title,
+                old_content=old_content,
+                new_content=content
             )
             db.add(history_entry)
 
         await db.commit()
-        await db.refresh(article)
+        await invalidate_article_cache(redis, article.id)
         return article
 
     except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка при обновлении статьи: {str(e)}"
+            detail="Ошибка обновления статьи"
         )
 
 @router.delete("/{article_id}", response_model=dict)
 async def delete_article(
     article_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    redis: aioredis.Redis = Depends(get_redis)
 ):
+    """Удаление статьи с инвалидацией кэша"""
     try:
         result = await db.execute(
             select(Article)
@@ -172,7 +204,7 @@ async def delete_article(
             raise HTTPException(status_code=404, detail="Статья не найдена")
         
         if article.author_id != current_user.user_id and current_user.role_id != 2:
-            raise HTTPException(status_code=403, detail="Доступ запрещен")
+            raise HTTPException(status_code=403, detail="Недостаточно прав для выполнения операции")
 
         article.is_deleted = True
         article.deleted_at = datetime.utcnow()
@@ -187,62 +219,14 @@ async def delete_article(
         db.add(history_entry)
         
         await db.commit()
+        await invalidate_article_cache(redis, article.id)
         return {"message": "Статья успешно удалена"}
 
     except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка при удалении статьи: {str(e)}"
-        )
-
-@router.post("/{article_id}/restore", response_model=ArticleResponse)
-async def restore_article(
-    article_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    try:
-        result = await db.execute(
-            select(Article)
-            .where(
-                Article.id == article_id,
-                Article.is_deleted == True,
-                Article.deleted_at >= datetime.utcnow() - timedelta(days=7)
-            )
-        )
-        article = result.scalar_one_or_none()
-        
-        if not article:
-            raise HTTPException(
-                status_code=404,
-                detail="Статья не найдена или срок восстановления истек"
-            )
-        
-        if article.author_id != current_user.user_id and current_user.role_id != 2:
-            raise HTTPException(status_code=403, detail="Доступ запрещен")
-
-        article.is_deleted = False
-        article.deleted_at = None
-        
-        history_entry = ArticleHistory(
-            article_id=article.id,
-            user_id=current_user.user_id,
-            event="RESTORE",
-            new_title=article.title,
-            new_content=article.content
-        )
-        db.add(history_entry)
-        
-        await db.commit()
-        await db.refresh(article)
-        return article
-
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка при восстановлении статьи: {str(e)}"
+            detail="Ошибка удаления статьи"
         )
 
 @router.get("/{article_id}/history", response_model=List[ArticleHistoryResponse])
@@ -251,33 +235,36 @@ async def get_article_history(
     offset: int = 0,
     limit: int = 10,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    redis: aioredis.Redis = Depends(get_redis)
 ):
-    try:
-        result = await db.execute(
-            select(Article)
-            .where(Article.id == article_id)
-        )
-        article = result.scalar_one_or_none()
-        
-        if not article:
-            raise HTTPException(status_code=404, detail="Статья не найдена")
-        
-        if article.author_id != current_user.user_id and current_user.role_id != 2:
-            raise HTTPException(status_code=403, detail="Доступ запрещен")
+    """Получение истории статьи с кэшированием"""
+    cache_key = f"article_history:{article_id}:{offset}:{limit}"
+    cached_data = await redis.get(cache_key)
+    
+    if cached_data:
+        return json.loads(cached_data)
 
-        result = await db.execute(
-            select(ArticleHistory)
-            .where(ArticleHistory.article_id == article_id)
-            .order_by(ArticleHistory.changed_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
-        
-        return result.scalars().all()
+    result = await db.execute(
+        select(Article)
+        .where(Article.id == article_id)
+    )
+    article = result.scalar_one_or_none()
+    
+    if not article:
+        raise HTTPException(status_code=404, detail="Статья не найдена")
+    
+    if article.author_id != current_user.user_id and current_user.role_id != 2:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
 
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка при получении истории статьи: {str(e)}"
-        )
+    result = await db.execute(
+        select(ArticleHistory)
+        .where(ArticleHistory.article_id == article_id)
+        .order_by(ArticleHistory.changed_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    
+    history = result.scalars().all()
+    await redis.setex(cache_key, 300, json.dumps([h.__dict__ for h in history]))
+    return history

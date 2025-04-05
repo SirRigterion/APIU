@@ -7,7 +7,7 @@ load_dotenv()
 
 class Settings:
     PROJECT_NAME: str = "API TTK"
-    PROJECT_VERSION: str = "4"
+    PROJECT_VERSION: str = "4.5"
     POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
     POSTGRES_PASSWORD: Optional[str] = os.getenv("POSTGRES_PASSWORD")
     POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "localhost")

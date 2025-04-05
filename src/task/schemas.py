@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 from src.task.enums import TaskStatus, TaskPriority
 from src.user.schemas import UserInfo
+
 class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = None
