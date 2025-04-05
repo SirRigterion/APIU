@@ -57,6 +57,7 @@ async def login(user: UserLogin, db: AsyncSession = Depends(get_db)):
         response = Response(status_code=200)
         set_auth_cookie(response, token)
         logger.info(f"Пользователь {user.email} успешно вошел в систему")
+        
         return response
     except Exception as e:
         logger.error(f"Ошибка при входе пользователя: {e}")
