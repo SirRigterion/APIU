@@ -1,3 +1,4 @@
+# src/user/schemas.py
 from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from typing import Optional
@@ -18,23 +19,22 @@ class UserProfile(BaseModel):
 
     class Config:
         from_attributes = True
-        orm_mode = True
 
 class UserUpdate(BaseModel):
     username: Optional[str] = Field(
-        default="user",
-        min_length=3, 
+        default=None,
+        min_length=3,
         max_length=50,
         pattern=r"^[a-zA-Z0-9_]+$"
     )
     full_name: Optional[str] = Field(
-        default="Иванов Иванович",
+        default=None,
         min_length=2,
         max_length=100,
         pattern=r"^[а-яА-ЯёЁ\s\-]+$"
     )
-    email: Optional[EmailStr] = Field(default="user@example.com")  # Значение по умолчанию
-    shift: str = Field(default="Первая")
+    email: Optional[EmailStr] = Field(default=None)
+    shift: Optional[str] = Field(default=None)
 
 class UserSearch(BaseModel):
-    limit: int = 10  
+    limit: int = 10
